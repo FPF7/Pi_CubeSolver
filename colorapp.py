@@ -1,89 +1,114 @@
-
 import cv2
 import numpy as np
+import json
 
 # --- CONFIGURATION ---
-VIDEO_FILE = 'test2.mp4' 
-
-# Global state
-paused = False
-current_hsv = None
+CAMERA_INDEX = 0          # Change to 0 or 1 depending on which camera you want to tune
+POSITIONS_FILE = "positions.json" # Or whatever you named the output from calib_pos.py
+CAMERA_KEY = "cam1"       # The key in your json file for this camera's positions
 
 def nothing(x): pass
 
+def classify_hsv_live(h, s, v, hsv_cfg):
+    # Same logic as your cube_to_kociemba.py
+    if v < hsv_cfg['v_min'] or v > hsv_cfg['v_max']: return "X" # X = Dark/Unknown
+    if s < hsv_cfg['s_min']: return "W"                         # W = White
+    if 0 <= h < hsv_cfg['r_o']: return "R"
+    if hsv_cfg['r_o'] <= h < hsv_cfg['o_y']: return "O"
+    if hsv_cfg['o_y'] <= h < hsv_cfg['y_g']: return "Y"
+    if hsv_cfg['y_g'] <= h < hsv_cfg['g_b']: return "G"
+    if hsv_cfg['g_b'] <= h < hsv_cfg['b_r']: return "B"
+    if hsv_cfg['b_r'] <= h <= 179: return "R" 
+    return "X"
+
 def main():
-    global paused, current_hsv
-    cv2.startWindowThread() 
+    global CAMERA_KEY, CAMERA_INDEX
+    # 1. Load Positions
+    try:
+        with open(POSITIONS_FILE, "r") as f:
+            pos_data = json.load(f)[CAMERA_KEY]
+    except Exception as e:
+        print(f"Error loading {POSITIONS_FILE}. Make sure the file exists and keys match. {e}")
+        return
+
+    cv2.namedWindow('Tuning Feed')
     
-    # 1. Setup the Windows
-    cv2.namedWindow('Calibration Feed')
-    cv2.namedWindow('Color Segments') # This shows all colors at once
+    # 2. Sliders
+    cv2.createTrackbar('red-orange', 'Tuning Feed', 10, 179, nothing)
+    cv2.createTrackbar('orange-yell', 'Tuning Feed', 25, 179, nothing)
+    cv2.createTrackbar('yellow-gree', 'Tuning Feed', 40, 179, nothing)
+    cv2.createTrackbar('green-blue', 'Tuning Feed', 90, 179, nothing)
+    cv2.createTrackbar('blue-red', 'Tuning Feed', 150, 179, nothing)
+    cv2.createTrackbar('black-filter', 'Tuning Feed', 50, 255, nothing) 
+    cv2.createTrackbar('white-filter', 'Tuning Feed', 60, 255, nothing) 
+    cv2.createTrackbar('val-max', 'Tuning Feed', 255, 255, nothing)     
 
-    # 2. Create Sliders matching your screenshot
-    # Column 1: Hue Transitions (0-179)
-    cv2.createTrackbar('red-orange', 'Calibration Feed', 10, 179, nothing)
-    cv2.createTrackbar('orange-yell', 'Calibration Feed', 25, 179, nothing)
-    cv2.createTrackbar('yellow-gree', 'Calibration Feed', 40, 179, nothing)
-    cv2.createTrackbar('green-blue', 'Calibration Feed', 90, 179, nothing)
-    cv2.createTrackbar('blue-red', 'Calibration Feed', 150, 179, nothing)
-
-    # Column 2: Filters (0-255)
-    cv2.createTrackbar('black-filter', 'Calibration Feed', 50, 255, nothing) # Value Min
-    cv2.createTrackbar('white-filter', 'Calibration Feed', 60, 255, nothing) # Saturation Min
-    cv2.createTrackbar('val-max', 'Calibration Feed', 255, 255, nothing)     # Brightness Max
-
-    cap = cv2.VideoCapture(0)
+    cap = cv2.VideoCapture(CAMERA_INDEX)
     
-    frame = cap.read()
     while True:
-        
-        
-                
+        ret, frame = cap.read()
+        if not ret: break
+
         current_hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
-        # 3. Read the border values from sliders
-        r_o = cv2.getTrackbarPos('red-orange', 'Calibration Feed')
-        o_y = cv2.getTrackbarPos('orange-yell', 'Calibration Feed')
-        y_g = cv2.getTrackbarPos('yellow-gree', 'Calibration Feed')
-        g_b = cv2.getTrackbarPos('green-blue', 'Calibration Feed')
-        b_r = cv2.getTrackbarPos('blue-red', 'Calibration Feed')
-        
-        v_min = cv2.getTrackbarPos('black-filter', 'Calibration Feed')
-        s_min = cv2.getTrackbarPos('white-filter', 'Calibration Feed')
-        v_max = cv2.getTrackbarPos('val-max', 'Calibration Feed')
+        # 3. Read Sliders
+        hsv_cfg = {
+            "r_o": cv2.getTrackbarPos('red-orange', 'Tuning Feed'),
+            "o_y": cv2.getTrackbarPos('orange-yell', 'Tuning Feed'),
+            "y_g": cv2.getTrackbarPos('yellow-gree', 'Tuning Feed'),
+            "g_b": cv2.getTrackbarPos('green-blue', 'Tuning Feed'),
+            "b_r": cv2.getTrackbarPos('blue-red', 'Tuning Feed'),
+            "v_min": cv2.getTrackbarPos('black-filter', 'Tuning Feed'),
+            "s_min": cv2.getTrackbarPos('white-filter', 'Tuning Feed'),
+            "v_max": cv2.getTrackbarPos('val-max', 'Tuning Feed')
+        }
 
-        # 4. Color Logic: Create masks for each segment
-        # We define each color as the space between two sliders
-        mask_red    = cv2.inRange(current_hsv, np.array([0, s_min, v_min]), np.array([r_o, 255, v_max]))
-        mask_orange = cv2.inRange(current_hsv, np.array([r_o, s_min, v_min]), np.array([o_y, 255, v_max]))
-        mask_yellow = cv2.inRange(current_hsv, np.array([o_y, s_min, v_min]), np.array([y_g, 255, v_max]))
-        mask_green  = cv2.inRange(current_hsv, np.array([y_g, s_min, v_min]), np.array([g_b, 255, v_max]))
-        mask_blue   = cv2.inRange(current_hsv, np.array([g_b, s_min, v_min]), np.array([b_r, 255, v_max]))
-        mask_red2   = cv2.inRange(current_hsv, np.array([b_r, s_min, v_min]), np.array([179, 255, v_max]))
-        
-        # White is special: It's anything with very low saturation
-        mask_white  = cv2.inRange(current_hsv, np.array([0, 0, v_min]), np.array([179, s_min, 255]))
+        # 4. Draw Positions and Live Predictions
+        for label, pt in pos_data.items():
+            x, y = pt['x'], pt['y']
+            
+            # Sample the center pixel at this position
+            h, s, v = current_hsv[y, x] 
+            
+            # Predict the color based on current sliders
+            predicted_letter = classify_hsv_live(h, s, v, hsv_cfg)
+            
+            # Draw it on screen
+            cv2.circle(frame, (x, y), 5, (255, 255, 255), 1)
+            cv2.putText(frame, predicted_letter, (x - 10, y - 10), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 3)
+            cv2.putText(frame, predicted_letter, (x - 10, y - 10), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 1)
 
-        # 5. Visualizer: Colorize the segments so you can see them all at once!
-        # This creates a "Heatmap" where each color is clearly separated
-        output = np.zeros_like(frame)
-        output[mask_red > 0]    = (0, 0, 255)    # Red
-        output[mask_orange > 0] = (0, 165, 255)  # Orange
-        output[mask_yellow > 0] = (0, 255, 255)  # Yellow
-        output[mask_green > 0]  = (0, 255, 0)    # Green
-        output[mask_blue > 0]   = (255, 0, 0)    # Blue
-        output[mask_red2 > 0]   = (0, 0, 255)    # Red (wrap-around)
-        output[mask_white > 0]  = (255, 255, 255)# White
-
-        cv2.imshow('Calibration Feed', frame)
-        cv2.imshow('Color Segments', output)
+        cv2.imshow('Tuning Feed', frame)
 
         key = cv2.waitKey(30) & 0xFF
+        
+        # Save and quit
         if key == ord('x'):
-            print(f"Borders: R-O:{r_o}, O-Y:{o_y}, Y-G:{y_g}, G-B:{g_b}, B-R:{b_r}")
+            with open("hsv_config.json", "w") as f:
+                json.dump(hsv_cfg, f, indent=2)
+            print("Saved tuned lighting to hsv_config.json")
             break
-        elif key == ord(' '):
-            paused = not paused
+            
+        # Swap Cameras!
+        elif key == ord('c'):
+            # Toggle the configuration
+            if CAMERA_KEY == "cam1":
+                CAMERA_KEY = "cam2"
+                CAMERA_INDEX = 0 # Or whatever index your second camera uses
+            else:
+                CAMERA_KEY = "cam1"
+                CAMERA_INDEX = 1 
+                
+            print(f"Switched to {CAMERA_KEY}")
+            
+            # Restart the video capture with the new camera
+            cap.release()
+            cap = cv2.VideoCapture(CAMERA_INDEX)
+            
+        elif key == ord('q'):
+            break
 
     cap.release()
     cv2.destroyAllWindows()
