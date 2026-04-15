@@ -76,14 +76,15 @@ class PositionCalibrator:
 if __name__ == "__main__":
     # Try index 1 for FRONT and 2 for BACK
     print("Calibrating Camera FRONT...")
-    f1 = capture_frame(0) 
+    f1 = capture_frame(1) 
     if f1 is None: 
         print("Still getting None for Cam 1. Check index or USB connection.")
         exit()
     data1 = PositionCalibrator(f1, CAM1_LABELS, "Cam 1").run()
     
     print("Calibrating Camera BACK...")
-    f2 = capture_frame(1)
+    f2 = capture_frame(0)
+    f2 = cv2.flip(f2,0)
     if f2 is None:
         print("Still getting None for Cam 2. Check index or USB connection.")
         exit()
