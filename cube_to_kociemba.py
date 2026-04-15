@@ -31,8 +31,16 @@ def capture_frame(camera_index: int) -> np.ndarray:
     time.sleep(1.0) # Let the camera adjust to lighting
     ret, frame = cap.read()
     cap.release()
+    
     if not ret or frame is None:
         raise RuntimeError(f"Failed to capture frame from camera {camera_index}")
+
+    # --- FLIP LOGIC ---
+    if camera_index == 0:
+        frame = cv2.flip(frame, 0)  # Flips Camera 0 vertically
+    elif camera_index == 1:
+        frame = cv2.flip(frame, 1)  # Flips Camera 1 horizontally (to match colorapp.py)
+
     return frame
 
 def classify_hsv(bgr_pixel, hsv_cfg):
