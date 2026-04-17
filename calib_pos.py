@@ -84,7 +84,7 @@ if __name__ == "__main__":
     
     print("Calibrating Camera BACK...")
     f2 = capture_frame(0)
-    f2 = cv2.flip(f2,0)
+    f2 = cv2.flip(f2,-1)
     if f2 is None:
         print("Still getting None for Cam 2. Check index or USB connection.")
         exit()
