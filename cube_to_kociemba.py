@@ -37,9 +37,7 @@ def capture_frame(camera_index: int) -> np.ndarray:
 
     # --- FLIP LOGIC ---
     if camera_index == 0:
-        frame = cv2.flip(frame, 0)  # Flips Camera 0 vertically
-    elif camera_index == 1:
-        frame = cv2.flip(frame, 1)  # Flips Camera 1 horizontally (to match colorapp.py)
+        frame = cv2.flip(frame, -1)  # Flips Camera 0 vertically
 
     return frame
 
@@ -48,7 +46,6 @@ def classify_hsv(bgr_pixel, hsv_cfg):
     hsv = cv2.cvtColor(pixel_np, cv2.COLOR_BGR2HSV)[0][0]
     h, s, v = hsv
 
-    if v < hsv_cfg['v_min'] or v > hsv_cfg['v_max']: return "unknown"
     if s < hsv_cfg['s_min']: return "white"
 
     if 0 <= h < hsv_cfg['r_o']: return "red"
@@ -95,40 +92,96 @@ def read_stickers(frame, positions, hsv_cfg):
 UART_PORT = '/dev/serial0' 
 BAUD_RATE = 115200
 
-def send_to_stm32(solution_string):
-    # Split the string "R2 U' F" into a list: ['R2', "U'", 'F']
-    moves = solution_string.split()
+# def send_to_stm32(solution_string):
+#     # Split the string "R2 U' F" into a list: ['R2', "U'", 'F']
+#     moves = solution_string.split()
     
+#     try:
+#         # Open the serial port
+#         ser = serial.Serial(UART_PORT, BAUD_RATE, timeout=1)
+#         time.sleep(2) # Give the connection a moment to initialize
+        
+#         print("Sending moves to STM32...")
+        
+#         for move in moves:
+#             # Add a newline or delimiter so the STM32 knows the command is complete
+#             command = f"{move}\n" 
+#             ser.write(command.encode('utf-8'))
+            
+#             print(f"Sent: {move}")
+
+
+# # U2 converts to double -> U U 
+# # anything prime converts to lowercase -> F' = f
+# # remove spaces
+# # random character at end symbolizing end of string
+# # send something to stm if fails kociemba
+
+#             # Optional: Wait for an "ACK" (acknowledgement) from the STM32 
+#             # before sending the next move so you don't overflow the RX buffer
+#             while True:
+#                 response = ser.readline().decode('utf-8').strip()
+#                 if response == "DONE":
+#                     break
+
+#         print("All moves sent!")
+#         ser.close()
+        
+#     except serial.SerialException as e:
+#         print(f"UART Error: {e}")
+
+# # Usage:
+# # solution = "R2 U' F L2 D"
+# # send_to_stm32(solution)
+
+def send_to_stm32(solution_string, is_success=True):
     try:
         # Open the serial port
         ser = serial.Serial(UART_PORT, BAUD_RATE, timeout=1)
         time.sleep(2) # Give the connection a moment to initialize
         
-        print("Sending moves to STM32...")
+        # --- KOCIEMBA FAILURE HANDLING ---
+        if not is_success:
+            print("Sending FAILURE flag to STM32...")
+            # Send a specific string so your C code knows to flash a red LED or abort
+            ser.write(b"FAIL!\n") 
+            ser.close()
+            return
+            
+        # --- FORMATTING THE STRING ---
+        moves = solution_string.split()
+        formatted_string = ""
         
         for move in moves:
-            # Add a newline or delimiter so the STM32 knows the command is complete
-            command = f"{move}\n" 
-            ser.write(command.encode('utf-8'))
-            
-            print(f"Sent: {move}")
-            
-            # Optional: Wait for an "ACK" (acknowledgement) from the STM32 
-            # before sending the next move so you don't overflow the RX buffer
-            while True:
-                response = ser.readline().decode('utf-8').strip()
-                if response == "DONE":
-                    break
+            face = move[0]
+            if len(move) == 1:       # Standard move (e.g., 'F')
+                formatted_string += face
+            elif move[1] == "'":     # Prime move (e.g., 'F') -> 'f'
+                formatted_string += face.lower()
+            elif move[1] == '2':     # Double move (e.g., 'U2') -> 'UU'
+                formatted_string += face + face
+                
+        # Append the random character at the end (using '!' as the terminator)
+        formatted_string += "!"
+        
+        # --- SENDING THE PAYLOAD ---
+        print(f"Sending to STM32: {formatted_string}")
+        
+        # We add \n so the STM32 UART interrupt knows the transmission is complete
+        ser.write((formatted_string + "\n").encode('utf-8')) 
+        
+        # Wait for an "ACK" from the STM32 after it finishes the ENTIRE sequence
+        print("Waiting for STM32 to finish...")
+        while True:
+            response = ser.readline().decode('utf-8').strip()
+            if response == "DONE":
+                print("Solve complete!")
+                break
 
-        print("All moves sent!")
         ser.close()
         
     except serial.SerialException as e:
         print(f"UART Error: {e}")
-
-# Usage:
-# solution = "R2 U' F L2 D"
-# send_to_stm32(solution)
 
 
 
@@ -144,9 +197,9 @@ def main():
         return
 
     print("Capturing Camera FRONT...")
-    frame1 = capture_frame(0) 
+    frame1 = capture_frame(1) 
     print("Capturing Camera BACK...")
-    frame2 = capture_frame(1) 
+    frame2 = capture_frame(0) 
 
     print("Analyzing colors...")
     faces1 = read_stickers(frame1, pos_data['cam1'], hsv_cfg)
@@ -165,14 +218,17 @@ def main():
     
     # Check for unrecognized colors
     if "?" in cube_string:
-        print("ERROR: Some stickers were unreadable (marked as '?'). Run colorapp.py to fix your lighting rules!")
+        print("ERROR: Some stickers were unreadable.")
+        send_to_stm32("", is_success=False) # <--- SEND FAILURE
     else:
         print("Validating and Solving with Kociemba...")
         try:
             solution = kociemba.solve(cube_string)
             print(f"\n>>> SUCCESS! Solution: {solution} <<<")
+            send_to_stm32(solution, is_success=True) # <--- SEND SUCCESS
         except Exception as e:
-            print(f"Kociemba failed (Usually means the cube string has impossible colors): {e}")
+            print(f"Kociemba failed: {e}")
+            send_to_stm32("", is_success=False) # <--- SEND FAILURE
 
 if __name__ == "__main__":
     main()
