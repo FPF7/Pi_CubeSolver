@@ -49,7 +49,6 @@ def main():
     cv2.createTrackbar('yellow-gree', 'Tuning Feed', 45, 179, nothing)
     cv2.createTrackbar('green-blue', 'Tuning Feed', 90, 179, nothing)
     cv2.createTrackbar('blue-red', 'Tuning Feed', 150, 179, nothing)
-    cv2.createTrackbar('black-filter', 'Tuning Feed', 30, 255, nothing) 
     cv2.createTrackbar('white-filter', 'Tuning Feed', 40, 255, nothing) 
     cv2.createTrackbar('val-max', 'Tuning Feed', 255, 255, nothing)
 
@@ -61,7 +60,7 @@ def main():
 
         # --- FLIP LOGIC ---
         if CAMERA_INDEX == 0:
-            frame = cv2.flip(frame, 0)  # Flip Camera 0 vertically
+            frame = cv2.flip(frame, -1)  # Flip Camera 0 vertically
         # elif CAMERA_INDEX == 1:
         #     frame = cv2.flip(frame, 1)  # Keep Camera 1 horizontally mirrored (or remove if you don't want this)
             
@@ -73,7 +72,6 @@ def main():
             "y_g": cv2.getTrackbarPos('yellow-gree', 'Tuning Feed'),
             "g_b": cv2.getTrackbarPos('green-blue', 'Tuning Feed'),
             "b_r": cv2.getTrackbarPos('blue-red', 'Tuning Feed'),
-            "v_min": cv2.getTrackbarPos('black-filter', 'Tuning Feed'),
             "s_min": cv2.getTrackbarPos('white-filter', 'Tuning Feed'),
             "v_max": cv2.getTrackbarPos('val-max', 'Tuning Feed')
         }
