@@ -8,7 +8,7 @@ import serial
 CUBE_JSON = "cube.json"
 UART_PORT = '/dev/serial0'
 BAUD_RATE = 115200
-RECALIBRATE = True  # Set True first run on Pi, False after
+RECALIBRATE = False  # Set True first run on Pi, False after
 
 COLOR_NAME_TO_FACE = {
     "white": "U", "red": "R", "green": "F",
@@ -44,6 +44,8 @@ def closest_color(bgr, color_refs):
 
 def capture_frame(camera_index: int) -> np.ndarray:
     cap = cv2.VideoCapture(camera_index)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
     time.sleep(1.0)
     ret, frame = cap.read()
     cap.release()
@@ -179,8 +181,8 @@ def main():
     first  = data.get("first_image", {})
     second = data.get("second_image", {})
 
-    cam0_idx = second.get("camera_index", 0)
-    cam1_idx = first.get("camera_index", 1)
+    cam0_idx = 0
+    cam1_idx = 2
 
     print(f"Capturing camera {cam1_idx} (first_image)...")
     frame1 = capture_frame(cam1_idx)
