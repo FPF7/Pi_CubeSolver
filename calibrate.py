@@ -3,23 +3,36 @@ import json
 import time
 from typing import Dict, List, Optional, Tuple
 
-WINDOW_NAME = "Calibration"
+WINDOW_NAME = "Position Calibration"
 DEFAULT_RADIUS = 6
 
 FIRST_LABELS = [
-    "B top-left", "B top-middle", "B top-right", "B middle-left", "B center", "B middle-right", "B bottom-left", "B bottom-middle", "B bottom-right",
-    "L top-left", "L top-middle", "L top-right", "L middle-left", "L center", "L middle-right", "L bottom-left", "L bottom-middle", "L bottom-right",
-    "D top-left", "D top-middle", "D top-right", "D middle-left", "D center", "D middle-right", "D bottom-left", "D bottom-middle", "D bottom-right",
+    "F top-left", "F top-middle", "F top-right",
+    "F middle-left", "F center", "F middle-right",
+    "F bottom-left", "F bottom-middle", "F bottom-right",
+
+    "R top-left", "R top-middle", "R top-right",
+    "R middle-left", "R center", "R middle-right",
+    "R bottom-left", "R bottom-middle", "R bottom-right",
+
+    "U top-left", "U top-middle", "U top-right",
+    "U middle-left", "U center", "U middle-right",
+    "U bottom-left", "U bottom-middle", "U bottom-right",
 ]
 
 SECOND_LABELS = [
-    "F top-left", "F top-middle", "F top-right", "F middle-left", "F center", "F middle-right", "F bottom-left", "F bottom-middle", "F bottom-right",
-    "R top-left", "R top-middle", "R top-right", "R middle-left", "R center", "R middle-right", "R bottom-left", "R bottom-middle", "R bottom-right",
-    "U top-left", "U top-middle", "U top-right", "U middle-left", "U center", "U middle-right", "U bottom-left", "U bottom-middle", "U bottom-right",
-]
+    "B top-left", "B top-middle", "B top-right",
+    "B middle-left", "B center", "B middle-right",
+    "B bottom-left", "B bottom-middle", "B bottom-right",
 
-FIRST_COLORS = ["green", "red", "yellow"]
-SECOND_COLORS = ["blue", "orange", "white"]
+    "D top-left", "D top-middle", "D top-right",
+    "D middle-left", "D center", "D middle-right",
+    "D bottom-left", "D bottom-middle", "D bottom-right",
+
+    "L top-left", "L top-middle", "L top-right",
+    "L middle-left", "L center", "L middle-right",
+    "L bottom-left", "L bottom-middle", "L bottom-right",
+]
 
 
 def draw_boxed_text(
@@ -71,46 +84,52 @@ def capture_single_frame(camera_index: int):
     return frame
 
 
+def rotate_point_180(x: int, y: int, width: int, height: int) -> Tuple[int, int]:
+    return width - 1 - x, height - 1 - y
+
+
 class FrameCalibration:
-    def __init__(self, frame, labels: List[str], colors: List[str], name: str, camera_index: int):
+    def __init__(self, frame, labels: List[str], name: str, camera_index: int, invert: bool = False):
         self.frame = frame
         self.labels = labels
-        self.colors = colors
         self.name = name
         self.camera_index = camera_index
+        self.invert = invert
 
         self.mode = "stickers"
         self.index = 0
         self.radius = DEFAULT_RADIUS
 
-        self.stickers: Dict[str, Dict[str, object]] = {}
-        self.color_refs: Dict[str, Dict[str, object]] = {}
+        self.stickers: Dict[str, Dict[str, int]] = {}
 
         cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
         cv2.setMouseCallback(WINDOW_NAME, self.click)
 
-    def get_labels(self) -> List[str]:
-        return self.labels if self.mode == "stickers" else self.colors
-
     def get_current_label(self) -> Optional[str]:
-        labels = self.get_labels()
-        if self.index < len(labels):
-            return labels[self.index]
+        if self.index < len(self.labels):
+            return self.labels[self.index]
         return None
 
-    def sample_patch_average(self, x: int, y: int, radius: int) -> List[int]:
+    def display_to_storage_coords(self, x: int, y: int) -> Tuple[int, int]:
+        """
+        Convert clicked display coordinates back to original frame coordinates
+        before saving.
+        """
+        if not self.invert:
+            return x, y
+
         h, w = self.frame.shape[:2]
-        x1 = max(0, x - radius)
-        x2 = min(w, x + radius + 1)
-        y1 = max(0, y - radius)
-        y2 = min(h, y + radius + 1)
+        return rotate_point_180(x, y, w, h)
 
-        patch = self.frame[y1:y2, x1:x2]
-        if patch.size == 0:
-            return [0, 0, 0]
+    def storage_to_display_coords(self, x: int, y: int) -> Tuple[int, int]:
+        """
+        Convert stored original frame coordinates into display coordinates.
+        """
+        if not self.invert:
+            return x, y
 
-        mean = patch.mean(axis=(0, 1))
-        return [int(round(v)) for v in mean.tolist()]
+        h, w = self.frame.shape[:2]
+        return rotate_point_180(x, y, w, h)
 
     def click(self, event, x, y, flags, param):
         if event != cv2.EVENT_LBUTTONDOWN:
@@ -123,76 +142,56 @@ class FrameCalibration:
         if label is None:
             return
 
-        avg_bgr = self.sample_patch_average(x, y, self.radius)
+        save_x, save_y = self.display_to_storage_coords(x, y)
 
         data = {
-            "x": int(x),
-            "y": int(y),
+            "x": int(save_x),
+            "y": int(save_y),
             "sample_radius": int(self.radius),
-            "avg_bgr": avg_bgr,
         }
 
-        if self.mode == "stickers":
-            self.stickers[label] = data
-        else:
-            self.color_refs[label] = data
-
-        print(f"{self.name} -> {label}: ({x}, {y}) BGR={avg_bgr}")
+        self.stickers[label] = data
+        print(
+            f"{self.name} -> {label}: "
+            f"display=({x}, {y}) saved=({save_x}, {save_y}) radius={self.radius}"
+        )
 
         self.index += 1
-        if self.index >= len(self.get_labels()):
+        if self.index >= len(self.labels):
             self.advance()
 
     def advance(self):
-        if self.mode == "stickers":
-            self.mode = "colors"
-            self.index = 0
-            print(f"{self.name}: sticker positions done. Now click colors: {', '.join(self.colors)}")
-        elif self.mode == "colors":
-            self.mode = "done"
-            print(f"{self.name}: done")
+        self.mode = "done"
+        print(f"{self.name}: done")
 
     def undo_last(self):
-        if self.mode == "done":
-            if self.color_refs:
-                self.mode = "colors"
-                self.index = len(self.color_refs)
-            else:
-                self.mode = "stickers"
-                self.index = len(self.stickers)
+        if self.index > 0:
+            self.index -= 1
+            label = self.labels[self.index]
+            self.stickers.pop(label, None)
+            self.mode = "stickers"
+            print(f"Undid sticker {label}")
+        else:
+            print("Nothing to undo.")
 
-        if self.mode == "colors":
-            if self.index > 0:
-                self.index -= 1
-                label = self.colors[self.index]
-                self.color_refs.pop(label, None)
-                print(f"Undid color {label}")
-                return
-            if self.stickers:
-                self.mode = "stickers"
-                self.index = len(self.stickers)
+    def toggle_invert(self):
+        self.invert = not self.invert
+        print(f"{self.name}: invert = {self.invert}")
 
-        if self.mode == "stickers":
-            if self.index > 0:
-                self.index -= 1
-                label = self.labels[self.index]
-                self.stickers.pop(label, None)
-                print(f"Undid sticker {label}")
-            else:
-                print("Nothing to undo.")
-
-    def draw_point(self, img, point: Dict[str, object], index: int, color: Tuple[int, int, int]):
+    def draw_point(self, img, point: Dict[str, int], index: int, color: Tuple[int, int, int]):
         x = int(point["x"])
         y = int(point["y"])
         r = int(point.get("sample_radius", self.radius))
 
-        cv2.circle(img, (x, y), r, color, 1)
-        cv2.circle(img, (x, y), 2, color, -1)
+        draw_x, draw_y = self.storage_to_display_coords(x, y)
+
+        cv2.circle(img, (draw_x, draw_y), r, color, 1)
+        cv2.circle(img, (draw_x, draw_y), 2, color, -1)
 
         draw_boxed_text(
             img,
             str(index + 1),
-            (x + 6, y - 6),
+            (draw_x + 6, draw_y - 6),
             text_color=color,
             font_scale=0.5,
             thickness=1,
@@ -202,21 +201,21 @@ class FrameCalibration:
     def draw(self):
         display = self.frame.copy()
 
+        if self.invert:
+            display = cv2.rotate(display, cv2.ROTATE_180)
+
         for i, label in enumerate(self.labels):
             if label in self.stickers:
                 self.draw_point(display, self.stickers[label], i, (0, 255, 0))
-
-        for i, label in enumerate(self.colors):
-            if label in self.color_refs:
-                self.draw_point(display, self.color_refs[label], i, (255, 200, 0))
 
         y = 25
         lines = [
             f"{self.name} (camera {self.camera_index})",
             f"Mode: {self.mode}",
             f"Radius: {self.radius}",
+            f"Invert: {self.invert}",
             f"Next: {self.get_current_label()}",
-            "Click=save  U=undo  +/- radius  Q=quit",
+            "Click=save  U=undo  I=invert  +/- radius  Q=quit",
         ]
 
         for line in lines:
@@ -228,7 +227,7 @@ class FrameCalibration:
     def run(self) -> Dict[str, object]:
         print(f"\n=== {self.name} ===")
         print(f"Using frozen frame from camera {self.camera_index}")
-        print("Controls: left click=save, U=undo, +/- radius, Q=quit")
+        print("Controls: left click=save, U=undo, I=invert, +/- radius, Q=quit")
 
         while True:
             display = self.draw()
@@ -243,6 +242,8 @@ class FrameCalibration:
                 self.radius = max(1, self.radius - 1)
             elif key == ord("u"):
                 self.undo_last()
+            elif key == ord("i"):
+                self.toggle_invert()
 
             if self.mode == "done":
                 break
@@ -251,44 +252,45 @@ class FrameCalibration:
 
         return {
             "camera_index": self.camera_index,
+            "invert": self.invert,
             "stickers": self.stickers,
-            "colors": self.color_refs,
         }
 
 
 def main():
-    print("Capturing one frame from camera 2...")
-    first_frame = capture_single_frame(1)
+    print("Capturing one frame from camera 0...")
+    first_frame = capture_single_frame(0)
 
     first = FrameCalibration(
         first_frame,
         FIRST_LABELS,
-        FIRST_COLORS,
-        "Camera 2: F/R/D",
-        1,
+        "Camera 0: F/R/U",
+        0,
+        invert=False,
     ).run()
 
-    print("Capturing one frame from camera 3...")
-    second_frame = capture_single_frame(0)
+    print("Capturing one frame from camera 1...")
+    second_frame = capture_single_frame(1)
 
     second = FrameCalibration(
         second_frame,
         SECOND_LABELS,
-        SECOND_COLORS,
-        "Camera 3: L/B/U",
-        0,
+        "Camera 1: B/D/L",
+        1,
+        invert=False,
     ).run()
 
     data = {
-        "first_image": first,
-        "second_image": second,
+        "camera_1": first,
+        "camera_2": second,
     }
 
-    with open("cube.json", "w", encoding="utf-8") as f:
+    with open("position.json", "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
 
-    print("Saved cube.json")
+    print("Saved position.json")
 
 
 if __name__ == "__main__":
     main()
+    
